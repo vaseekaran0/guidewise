@@ -1,0 +1,6 @@
+{
+  "name": "GuideWise",
+  "description": "An interactive educational CRISPR-Cas9 simulation platform demonstrating guide RNA matching, PAM recognition, mismatch analysis, and hypothetical DNA editing using synthetic sequences.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
