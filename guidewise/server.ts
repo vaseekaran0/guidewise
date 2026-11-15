@@ -16,9 +16,12 @@ import { getAllExamples, getRunById, listRuns, saveAnalysisRun } from './server/
 import { answerEducationalQuestion } from './server/qa.ts';
 import { buildCsvReport, buildPdfReportBuffer } from './server/reports.ts';
 
-const PORT = Number(process.env.PORT || 3000);
-
-async function startServer() {
+/**
+ * Creates and configures the Express application with all GuideWise API routes.
+ * Does NOT start a listening server — intended for both local dev (via `startServer`)
+ * and serverless deployment (via `api/index.ts` on Vercel).
+ */
+export async function createApp(): Promise<import('express').Application> {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
@@ -254,9 +257,19 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+const PORT = Number(process.env.PORT || 3000);
+
+async function startServer() {
+  const app = await createApp();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`GuideWise server listening on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+// Only start the HTTP server when run directly (not when imported by serverless on Vercel)
+if (!process.env.VERCEL) {
+  startServer();
+}
