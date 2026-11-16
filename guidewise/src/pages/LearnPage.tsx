@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, MessageSquare, Search, Send, ShieldAlert, X } from 'lucide-react';
+import { BookOpen, MessageSquare, Search, Send, ShieldAlert, X, Scissors } from 'lucide-react';
 import { DnaHelixViewport } from '../components/DnaHelixViewport.js';
+const Cas9Simulation3D = lazy(() =>
+  import('../components/Cas9Simulation3D.js').then((m) => ({ default: m.Cas9Simulation3D }))
+);
 import { GlassCard } from '../components/GlassCard.js';
 import { AppLanguage, UI_STRINGS } from '../data/i18n.js';
 import { EDUCATIONAL_DISCLAIMER, TEST_VECTOR } from '../shared/crisprEngine.js';
@@ -162,6 +165,39 @@ export const LearnPage: React.FC<LearnPageProps> = ({
             : 'Interactive holographic DNA vs RNA comparison, searchable 32-entry glossary, and grounded educational Q&A assistant.'}
         </p>
       </div>
+
+      {/* Interactive CRISPR-Cas9 Molecular Simulation */}
+      <GlassCard className="p-5 sm:p-6 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+          <div className="space-y-1">
+            <div className="text-xs font-mono text-[#22d3ee]">Interactive Molecular Lab</div>
+            <h2 className="font-display text-xl sm:text-2xl font-bold text-[#e8f3f1]">
+              CRISPR-Cas9 Gene-Editing Simulation
+            </h2>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#ffb020]">
+            <Scissors className="w-3.5 h-3.5" />
+            Educational · Illustrative geometry
+          </div>
+        </div>
+        <Suspense
+          fallback={
+            <div className="h-[420px] sm:h-[500px] flex items-center justify-center rounded-2xl border border-white/10 bg-[#04060d]">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-10 h-10 rounded-full border-2 border-[#22d3ee]/30 border-t-[#22d3ee] animate-spin" />
+                <span className="text-[11px] font-mono text-[#22d3ee]">Loading molecular lab…</span>
+              </div>
+            </div>
+          }
+        >
+          <Cas9Simulation3D
+            dna={TEST_VECTOR.dna}
+            guide={TEST_VECTOR.guide}
+            pam={TEST_VECTOR.pam}
+            reducedMotion={!motionEnabled}
+          />
+        </Suspense>
+      </GlassCard>
 
       {/* Animated Holographic DNA vs RNA Scene (Inspired by Reference Video) */}
       <GlassCard className="p-5 sm:p-6 space-y-5">

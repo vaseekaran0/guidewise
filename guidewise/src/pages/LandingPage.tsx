@@ -258,7 +258,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             className="absolute inset-0 pointer-events-none"
             style={{
               background:
-                'linear-gradient(95deg, rgba(5,10,20,0.92) 0%, rgba(5,10,20,0.72) 48%, rgba(5,10,20,0.24) 100%)',
+                'linear-gradient(95deg, rgba(5,10,20,0.78) 0%, rgba(5,10,20,0.44) 48%, rgba(5,10,20,0.05) 100%)',
             }}
           />
           {/* Subtle atmospheric radial mesh for depth */}

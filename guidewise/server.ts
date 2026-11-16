@@ -269,7 +269,13 @@ async function startServer() {
   });
 }
 
-// Only start the HTTP server when run directly (not when imported by serverless on Vercel)
-if (!process.env.VERCEL) {
+// Only start the HTTP server when run directly (not when imported by tests or serverless on Vercel)
+const isDirectEntry =
+  Boolean(process.argv[1]) &&
+  (import.meta.filename === process.argv[1] ||
+    process.argv[1].endsWith('server.ts') ||
+    process.argv[1].endsWith('server.js'));
+
+if (isDirectEntry && !process.env.VERCEL && !process.env.GUIDEWISE_TEST) {
   startServer();
 }

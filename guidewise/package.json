@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/engine.test.ts"
+    "test:engine": "tsx tests/engine.test.ts",
+    "test:api": "tsx tests/api.test.ts",
+    "test": "tsx tests/engine.test.ts && tsx tests/api.test.ts"
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.3.0",

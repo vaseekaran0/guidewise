@@ -69,6 +69,13 @@ const COMPARE_DEMO_PRESETS: Array<{
   },
 ];
 
+function getScoreVariant(score: number): 'excellent' | 'good' | 'poor' | 'null' {
+  if (score >= 75) return 'excellent';
+  if (score >= 25) return 'good';
+  if (score > 0) return 'poor';
+  return 'null';
+}
+
 export const ComparePage: React.FC<ComparePageProps> = ({
   initialCompare,
   onLoadInSimulator,
@@ -168,26 +175,120 @@ export const ComparePage: React.FC<ComparePageProps> = ({
         })
     : [];
 
+  const EmptyState = () => (
+    <div className="gw-empty-state">
+      <div className="gw-empty-icon" aria-hidden="true">
+        <GitCompare className="w-8 h-8" />
+      </div>
+      <h2 className="gw-empty-title">
+        {language === 'ta' ? 'Guide RNA ஒப்பீடு' : 'Ready to Compare Guides'}
+      </h2>
+      <p className="gw-empty-description">
+        {language === 'ta'
+          ? '2 முதல் 6 guide RNA வரிசைகளை ஒரே செயற்கை DNA வரிசையோடு ஒப்பிட்டு, அனைத்து பொருத்தங்களையும் ஒரே வரைபடத்தில் ஆராயுங்கள்.'
+          : 'Compare 2 to 6 candidate guide RNAs against the same synthetic DNA sequence and inspect all hits on a single coordinate map.'}
+      </p>
+    </div>
+  );
+
+  const ErrorState = () => (
+    <div className="gw-error-state">
+      <div className="gw-error-icon" aria-hidden="true">
+        <AlertCircle className="w-6 h-6" />
+      </div>
+      <h2 className="gw-error-title">{language === 'ta' ? 'சரிவு' : 'Comparison Failed'}</h2>
+      <p className="gw-error-description">{error}</p>
+      <button
+        type="button"
+        onClick={() => runComparison(dna, guides, pam, maxMm)}
+        className="gw-btn-lime px-5 py-2 rounded-xl text-xs font-semibold hover:opacity-90"
+      >
+        Try Again
+      </button>
+    </div>
+  );
+
+  const LoadingSkeleton = () => (
+    <div className="gw-loading-container">
+      <div className="gw-loading-spinner" aria-label="Loading" />
+      <div className="gw-skeleton-text long" />
+      <div className="gw-skeleton-text medium" />
+      <div className="gw-skeleton-text short" />
+      <div className="gw-skeleton-table-row">
+        <div className="gw-skeleton-cell mini" />
+        <div className="flex-1">
+          <div className="gw-skeleton-text medium" />
+          <div className="gw-skeleton-text short" />
+        </div>
+      </div>
+      <div className="gw-skeleton-table-row">
+        <div className="gw-skeleton-cell mini" />
+        <div className="flex-1">
+          <div className="gw-skeleton-text medium" />
+          <div className="gw-skeleton-text short" />
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      <div className="space-y-1">
-        <h1 className="font-display font-bold text-[#e8f3f1] gw-page-title">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-8">
+      {/* Premium Hero Header */}
+      <div className="space-y-2">
+        <div className="gw-section-header">
+          <div>
+            <h1 className="font-display font-bold text-[#e8f3f1] gw-page-title">
           {UI_STRINGS[language].compareTitle}
         </h1>
         <p className="text-sm text-[#8aa4ad]">
           {language === 'ta'
             ? 'ஒரே செயற்கை DNA வரிசையில் 2 முதல் 6 guide RNA-களை அருகருகே ஒப்பிட்டு ஒரே வரைபடத்தில் இலக்குகளைக் காண்க.'
             : 'Compare 2 to 6 candidate guide RNAs side by side against the same synthetic DNA sequence and inspect all hits on a single coordinate map.'}
-        </p>
+            </p>
+          </div>
+          <span className="gw-rank-badge primary">Compare</span>
+        </div>
       </div>
 
+      {/* Results Summary Strip */}
+      {!loading && result && (
+        <div className="gw-summary-strip">
+          <div className="gw-summary-item">
+            <div className="gw-summary-label">Guides Compared</div>
+            <div className="gw-summary-value muted">{rankedResults.length}</div>
+            <div className="gw-summary-subvalue">candidate sequences</div>
+          </div>
+          <div className="gw-summary-item">
+            <div className="gw-summary-label">Best Score</div>
+            <div className={`gw-summary-value ${getScoreVariant(rankedResults[0]?.summary.bestScore ?? 0) === 'excellent' ? 'ok' : getScoreVariant(rankedResults[0]?.summary.bestScore ?? 0) === 'good' ? 'warn' : 'poor'}`}>
+              {(rankedResults[0]?.summary.bestScore ?? 0).toFixed(1)}
+            </div>
+            <div className="gw-summary-subvalue">educational estimate</div>
+          </div>
+          <div className="gw-summary-item">
+            <div className="gw-summary-label">Total Sites</div>
+            <div className="gw-summary-value ok">{rankedResults.reduce((sum, gr) => sum + gr.sites.length, 0)}</div>
+            <div className="gw-summary-subvalue">across all guides</div>
+          </div>
+          <div className="gw-summary-item">
+            <div className="gw-summary-label">DNA Length</div>
+            <div className="gw-summary-value muted">{result.dna.length} bp</div>
+            <div className="gw-summary-subvalue">PAM: {result.pam}</div>
+          </div>
+        </div>
+      )}
+
       {/* Quick Demo Presets Strip */}
-      <GlassCard className="p-4 space-y-2.5">
+      <GlassCard className="gw-results-card p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-medium text-[#e8f3f1]">
-            Ready-to-Explain Demo Examples
-          </span>
-          <span className="text-[11px] font-mono text-[#22d3ee]">{activeDemo.badge}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-[#e8f3f1]">
+              Ready-to-Explain Demo Examples
+            </span>
+            <span className="text-[10px] font-mono text-[#22d3ee] bg-[#22d3ee]/10 px-2 py-0.5 rounded-full border border-[#22d3ee]/20">
+              {activeDemo.badge}
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {COMPARE_DEMO_PRESETS.map((preset) => {
@@ -197,10 +298,10 @@ export const ComparePage: React.FC<ComparePageProps> = ({
                 key={preset.id}
                 type="button"
                 onClick={() => handleLoadDemoPreset(preset)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all duration-200 cursor-pointer ${
                   active
-                    ? 'border-[#c6ff3d] bg-[#c6ff3d] text-[#050a14] font-semibold'
-                    : 'border-white/15 bg-white/5 text-[#c7d8d6] hover:border-[#22d3ee]/50 hover:text-[#e8f3f1]'
+                    ? 'border-[#c6ff3d] bg-[#c6ff3d] text-[#050a14] font-semibold shadow-[0_0_16px_-4px_rgba(198,255,61,0.4)]'
+                    : 'border-white/15 bg-white/5 text-[#c7d8d6] hover:border-[#22d3ee]/50 hover:text-[#e8f3f1] hover:shadow-[0_0_20px_-4px_rgba(34,211,238,0.25)]'
                 }`}
               >
                 {preset.label}
@@ -209,47 +310,49 @@ export const ComparePage: React.FC<ComparePageProps> = ({
           })}
         </div>
         <p className="text-xs text-[#8aa4ad] leading-relaxed">
-          <strong className="text-[#22d3ee]">Demo takeaway:</strong> {activeDemo.takeaway}
+          <span className="inline-flex items-center gap-1 text-[#22d3ee]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#22d3ee]" aria-hidden="true" />
+            Demo takeaway:
+          </span>
+          {' '}
+          {activeDemo.takeaway}
         </p>
       </GlassCard>
 
-      {/* Input Glass Panel */}
-      <GlassCard className="p-5 sm:p-6">
+      {/* Input Panel */}
+      <GlassCard className="gw-results-card p-5 sm:p-6">
         <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-5 space-y-3">
-            <label htmlFor="compare-dna" className="block text-xs font-medium text-[#e8f3f1]">
-              Shared synthetic DNA sequence (FASTA or plain, ≥30 bp)
-            </label>
-            <textarea
-              id="compare-dna"
-              rows={5}
-              value={dna}
-              onChange={(e) => setDna(e.target.value)}
-              spellCheck={false}
-              className="w-full rounded-xl border border-white/15 bg-[#050a14]/80 px-3 py-2.5 text-xs font-mono text-[#e8f3f1] focus:border-[#c6ff3d] focus:outline-none"
-            />
+            <div className="gw-form-group">
+              <label htmlFor="compare-dna" className="gw-form-label">
+                Shared Synthetic DNA
+              </label>
+              <textarea
+                id="compare-dna"
+                rows={5}
+                value={dna}
+                onChange={(e) => setDna(e.target.value)}
+                spellCheck={false}
+                className="w-full rounded-xl border border-white/15 bg-[#050a14]/80 px-3 py-2.5 text-xs font-mono text-[#e8f3f1] focus:border-[#c6ff3d] focus:outline-none transition-all duration-200"
+              />
+              <p className="gw-form-hint">FASTA or plain A/C/G/T sequence, minimum 30 bp</p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="compare-pam" className="block text-xs font-medium text-[#e8f3f1] mb-1">
-                  PAM motif
-                </label>
+              <div className="gw-form-group">
+                <label htmlFor="compare-pam" className="gw-form-label">PAM Motif</label>
                 <select
                   id="compare-pam"
                   value={pam}
                   onChange={(e) => setPam(e.target.value as PamType)}
-                  className="w-full rounded-xl border border-white/15 bg-[#050a14]/80 px-3 py-2 text-xs font-mono text-[#e8f3f1]"
+                  className="w-full rounded-xl border border-white/15 bg-[#050a14]/80 px-3 py-2 text-xs font-mono text-[#e8f3f1] focus:border-[#c6ff3d] focus:outline-none transition-all duration-200"
                 >
                   {(Object.keys(SUPPORTED_PAMS) as PamType[]).map((k) => (
-                    <option key={k} value={k}>
-                      {k}
-                    </option>
+                    <option key={k} value={k}>{k}</option>
                   ))}
                 </select>
               </div>
-              <div>
-                <label htmlFor="compare-mm" className="block text-xs font-medium text-[#e8f3f1] mb-1">
-                  Max mismatches: <span className="font-mono text-[#c6ff3d]">{maxMm}</span>
-                </label>
+              <div className="gw-form-group">
+                <label htmlFor="compare-mm" className="gw-form-label">Max Mismatches</label>
                 <input
                   id="compare-mm"
                   type="range"
@@ -259,6 +362,11 @@ export const ComparePage: React.FC<ComparePageProps> = ({
                   onChange={(e) => setMaxMm(Number(e.target.value))}
                   className="w-full accent-[#c6ff3d] mt-2 cursor-pointer"
                 />
+                <div className="flex justify-between text-[10px] text-[#8aa4ad] mt-1">
+                  <span>0</span>
+                  <span className="font-mono text-[#c6ff3d]">{maxMm}</span>
+                  <span>6</span>
+                </div>
               </div>
             </div>
           </div>
@@ -272,18 +380,24 @@ export const ComparePage: React.FC<ComparePageProps> = ({
                 type="button"
                 onClick={handleAddGuide}
                 disabled={guides.length >= 6}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border border-white/15 bg-white/5 text-xs text-[#22d3ee] hover:border-[#22d3ee]/50 disabled:opacity-40 cursor-pointer"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border transition-all duration-200 cursor-pointer ${
+                  guides.length >= 6
+                    ? 'border-white/10 bg-white/5 text-[#8aa4ad] opacity-40 cursor-not-allowed'
+                    : 'border-white/15 bg-white/5 text-[#22d3ee] hover:border-[#22d3ee]/50 hover:text-[#e8f3f1] hover:shadow-[0_0_16px_-4px_rgba(34,211,238,0.3)]'
+                }`}
               >
                 <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                Add guide ({guides.length}/6)
+                <span className="text-xs">Add guide ({guides.length}/6)</span>
               </button>
             </div>
 
             <div className="space-y-2">
               {guides.map((g, idx) => (
                 <div key={`guide-row-${idx}`} className="flex items-center gap-2">
-                  <span className="w-16 text-xs font-mono text-[#8aa4ad] shrink-0">
-                    Guide #{idx + 1}
+                  <span className="w-16 shrink-0 flex items-center justify-center">
+                    <span className="text-[10px] font-mono text-[#8aa4ad] bg-white/5 px-2 py-0.5 rounded border border-white/10">
+                      G#{idx + 1}
+                    </span>
                   </span>
                   <input
                     type="text"
@@ -291,14 +405,18 @@ export const ComparePage: React.FC<ComparePageProps> = ({
                     onChange={(e) => handleGuideChange(idx, e.target.value)}
                     spellCheck={false}
                     placeholder="Enter 15-25 nt guide sequence..."
-                    className="flex-1 rounded-xl border border-white/15 bg-[#050a14]/80 px-3 py-2 text-xs font-mono text-[#e8f3f1] focus:border-[#c6ff3d] focus:outline-none"
+                    className="flex-1 rounded-xl border border-white/15 bg-[#050a14]/80 px-3 py-2 text-xs font-mono text-[#e8f3f1] focus:border-[#c6ff3d] focus:outline-none transition-all duration-200"
                   />
                   <button
                     type="button"
                     onClick={() => handleRemoveGuide(idx)}
                     disabled={guides.length <= 2}
                     aria-label={`Remove guide ${idx + 1}`}
-                    className="p-2 rounded-xl border border-white/15 text-[#8aa4ad] hover:text-[#ff4d6d] disabled:opacity-30 cursor-pointer"
+                    className={`p-2 rounded-xl border transition-all duration-200 cursor-pointer ${
+                      guides.length <= 2
+                        ? 'border-white/10 text-[#8aa4ad] opacity-40 cursor-not-allowed'
+                        : 'border-white/15 text-[#ff4d6d] hover:bg-[#ff4d6d]/10 hover:border-[#ff4d6d]/50'
+                    }`}
                   >
                     <Trash2 className="w-4 h-4" aria-hidden="true" />
                   </button>
@@ -306,14 +424,14 @@ export const ComparePage: React.FC<ComparePageProps> = ({
               ))}
             </div>
 
-            <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
+            <div className="pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
               {error ? (
                 <div className="flex items-center gap-2 text-xs text-[#ff4d6d]">
                   <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>{error}</span>
                 </div>
               ) : (
-                <span className="text-xs text-[#8aa4ad]">
+                <span className="text-xs text-[#8aa4ad] font-mono">
                   Scores are educational estimates comparing seed complementarity and PAM validity.
                 </span>
               )}
@@ -323,7 +441,7 @@ export const ComparePage: React.FC<ComparePageProps> = ({
                 disabled={loading}
                 motionEnabled={motionEnabled}
                 variant="lime"
-                className="px-5 py-2.5 text-sm"
+                className="px-5 py-2.5 text-sm font-semibold"
               >
                 <GitCompare className="w-4 h-4" aria-hidden="true" />
                 {loading ? 'Comparing guides...' : 'Compare guides'}
@@ -333,47 +451,85 @@ export const ComparePage: React.FC<ComparePageProps> = ({
         </form>
       </GlassCard>
 
+      {/* Loading / Empty / Error States */}
+      {loading && <LoadingSkeleton />}
+      {!loading && !result && !error && <EmptyState />}
+      {!loading && !result && error && <ErrorState />}
+
       {/* Side-by-Side Guide Cards */}
       {!loading && result && (
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {rankedResults.map((gr, idx) => (
-            <GlassCard
-              key={`card-${gr.guide}-${idx}`}
-              tilt
-              motionEnabled={motionEnabled}
-              className="p-5 space-y-3"
-            >
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-0.5 rounded-full bg-[#c6ff3d]/15 border border-[#c6ff3d]/35 text-xs font-mono font-semibold text-[#c6ff3d]">
-                  Rank #{idx + 1}
-                </span>
-                <span className="text-xs font-mono text-[#8aa4ad]">
-                  {gr.sites.length} site(s)
-                </span>
-              </div>
-              <div className="font-mono text-xs sm:text-sm text-[#e8f3f1] break-all bg-[#050a14]/70 rounded-xl px-3 py-2 border border-white/10">
-                {gr.guide}
-              </div>
-              <div className="flex items-center justify-between text-xs pt-1">
-                <div>
-                  <span className="text-[#8aa4ad]">Best Est. Score: </span>
-                  <span className="font-mono font-bold text-[#3ddc84]">
-                    {gr.summary.bestScore.toFixed(1)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[#8aa4ad]">Off-targets: </span>
-                  <span className="font-mono font-bold text-[#ffb020]">{gr.offTargetValid}</span>
-                </div>
-              </div>
-            </GlassCard>
-          ))}
-        </section>
+        <div>
+          <div className="gw-section-header">
+            <div>
+              <h2 className="gw-section-title">Guide Ranking Cards</h2>
+              <p className="gw-section-subtitle">
+                Ranked by educational estimate score, with off-target validity and site distribution.
+              </p>
+            </div>
+            <span className="text-[10px] font-mono text-[#8aa4ad]">{rankedResults.length} guide(s) ranked</span>
+          </div>
+          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {rankedResults.map((gr, idx) => {
+              const scoreVariant = getScoreVariant(gr.summary.bestScore);
+              const scoreColor = scoreVariant === 'excellent' ? 'text-[#3ddc84]' : scoreVariant === 'good' ? 'text-[#ffb020]' : 'text-[#ff4d6d]';
+              return (
+                <GlassCard
+                  key={`card-${gr.guide}-${idx}`}
+                  tilt
+                  motionEnabled={motionEnabled}
+                  className="gw-results-card p-5 space-y-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`gw-rank-badge ${idx === 0 ? 'primary' : 'secondary'}`}>
+                        #{idx + 1}
+                      </div>
+                      <span className="text-xs font-mono text-[#8aa4ad]">
+                        {gr.sites.length} site(s)
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full border text-xs font-mono font-semibold border-[#3ddc84]/35 text-[#3ddc84] bg-[#3ddc84]/10">
+                      Ranked
+                    </span>
+                  </div>
+                  <div className="font-mono text-xs sm:text-sm text-[#e8f3f1] break-all bg-[#050a14]/70 rounded-xl px-3 py-2 border border-white/10">
+                    {gr.guide}
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-medium text-[#8aa4ad] uppercase tracking-wider">Best Est. Score</span>
+                        <span className={`font-mono font-bold text-sm ${scoreColor}`}>{gr.summary.bestScore.toFixed(1)}</span>
+                      </div>
+                      <span className={`gw-score-pill ${scoreVariant}`}>
+                        {scoreVariant === 'excellent' ? 'Excellent' : scoreVariant === 'good' ? 'Good' : scoreVariant === 'poor' ? 'Poor' : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-medium text-[#8aa4ad] uppercase tracking-wider">Off-targets</span>
+                      <span className="font-mono font-bold text-sm text-[#ffb020]">{gr.offTargetValid}</span>
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-white/10">
+                    <div className="flex items-center justify-between text-[10px] font-mono text-[#8aa4ad] mb-1">
+                      <span>Perfect (0 MM)</span>
+                      <span className="font-mono text-[#e8f3f1]">{gr.summary.perfectMatches}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] font-mono text-[#8aa4ad]">
+                      <span>No-PAM Sites</span>
+                      <span className="font-mono text-[#8aa4ad]">{gr.sites.filter((s) => !s.pamOk).length}</span>
+                    </div>
+                  </div>
+                </GlassCard>
+              );
+            })}
+          </section>
+        </div>
       )}
 
       {/* Ranking Table */}
       {result && (
-        <GlassCard className="overflow-hidden">
+        <GlassCard className="gw-results-card overflow-hidden">
           <div className="px-5 py-4 border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-lg font-semibold text-[#e8f3f1]">
               Guide Ranking Table (Educational Estimate)
@@ -383,8 +539,8 @@ export const ComparePage: React.FC<ComparePageProps> = ({
             </span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
+          <div className="gw-table-wrapper">
+            <table className="gw-table">
               <thead>
                 <tr className="border-b border-white/10 bg-[#050a14]/70 text-xs text-[#8aa4ad]">
                   <th className="py-3 px-4">Rank</th>

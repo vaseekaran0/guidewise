@@ -135,6 +135,139 @@ function disposeObject3DTree(root: THREE.Object3D) {
   materials.forEach((m) => m.dispose());
 }
 
+interface EnergyTrailOptions {
+  color: number;
+  phase: number;
+  radius: number;
+  turns: number;
+  halfHeight: number;
+  headLength?: number;
+  tailLength?: number;
+  segments?: number;
+}
+
+/**
+ * A curved, tapered additive ribbon that reads as a glowing comet/energy streak
+ * flowing along a helical path. The head is bright and wide; the tail fades out.
+ */
+class EnergyTrail {
+  readonly mesh: THREE.Mesh;
+  private readonly geo: THREE.BufferGeometry;
+  private readonly posAttr: THREE.BufferAttribute;
+  private readonly colAttr: THREE.BufferAttribute;
+  private readonly headLength: number;
+  private readonly tailLength: number;
+  private readonly segments: number;
+  private readonly total = 1;
+  private readonly turns: number;
+  private readonly radius: number;
+  private readonly halfHeight: number;
+  private readonly phase: number;
+  private readonly color: THREE.Color;
+  private readonly white: THREE.Color;
+
+  constructor(opts: EnergyTrailOptions) {
+    this.headLength = opts.headLength ?? 0.16;
+    this.tailLength = opts.tailLength ?? 0.55;
+    this.segments = opts.segments ?? 120;
+    this.turns = opts.turns;
+    this.radius = opts.radius;
+    this.halfHeight = opts.halfHeight;
+    this.phase = opts.phase;
+    this.color = new THREE.Color(opts.color);
+    this.white = new THREE.Color(0xffffff);
+
+    const vertCount = (this.segments + 1) * 2;
+    const positions = new Float32Array(vertCount * 3);
+    const colors = new Float32Array(vertCount * 3);
+    const indices: number[] = [];
+    for (let i = 0; i < this.segments; i++) {
+      const a = i * 2;
+      const b = a + 1;
+      const c = a + 2;
+      const d = a + 3;
+      indices.push(a, b, d, a, d, c);
+    }
+
+    this.geo = new THREE.BufferGeometry();
+    this.posAttr = new THREE.BufferAttribute(positions, 3);
+    this.colAttr = new THREE.BufferAttribute(colors, 3);
+    this.geo.setAttribute('position', this.posAttr);
+    this.geo.setAttribute('color', this.colAttr);
+    this.geo.setIndex(indices);
+
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+
+    this.mesh = new THREE.Mesh(this.geo, mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 6;
+  }
+
+  /** headT in [0,1] along the helix path; length is fraction of the full path */
+  update(headT: number, length: number) {
+    const pos = this.posAttr.array as Float32Array;
+    const col = this.colAttr.array as Float32Array;
+    const headAngle = headT * Math.PI * 2 * this.turns + this.phase;
+
+    for (let s = 0; s <= this.segments; s++) {
+      const u = s / this.segments;
+      const back = u * length;
+      const tRaw = headT - back;
+      const wrapped = ((tRaw % 1) + 1) % 1;
+      const angle = wrapped * Math.PI * 2 * this.turns + this.phase;
+      const y = (wrapped - 0.5) * this.halfHeight * 2;
+      const r = this.radius;
+      const cx = Math.cos(angle) * r;
+      const cz = Math.sin(angle) * r;
+
+      const fade = 1 - u;
+      const taper = fade * fade;
+      const width = 0.02 + taper * 0.3;
+      const dx = Math.cos(angle) * width;
+      const dz = Math.sin(angle) * width;
+
+      const idx = s * 6;
+      pos[idx] = cx - dx;
+      pos[idx + 1] = y;
+      pos[idx + 2] = cz - dz;
+      pos[idx + 3] = cx + dx;
+      pos[idx + 4] = y;
+      pos[idx + 5] = cz + dz;
+
+      const headMix = Math.max(0, 1 - u * 2.5);
+      const cr = this.color.r + (this.white.r - this.color.r) * headMix * 0.55;
+      const cg = this.color.g + (this.white.g - this.color.g) * headMix * 0.55;
+      const cb = this.color.b + (this.white.b - this.color.b) * headMix * 0.55;
+      const f = fade * fade;
+
+      col[idx] = cr * f;
+      col[idx + 1] = cg * f;
+      col[idx + 2] = cb * f;
+      col[idx + 3] = cr * f;
+      col[idx + 4] = cg * f;
+      col[idx + 5] = cb * f;
+    }
+
+    this.posAttr.needsUpdate = true;
+    this.colAttr.needsUpdate = true;
+    // Keep the (unused but referenced) head angle from tripping tree-shaking hints
+    void headAngle;
+  }
+
+  dispose() {
+    this.geo.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+  }
+}
+
 export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
   dna,
   sites,
@@ -230,6 +363,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     lastBpReported: 1,
     lastCalloutKey: '',
     resetCameraRequested: false,
+    introCamProgress: 0,
     fogEnabled,
     ambientIntensity,
     particlesEnabled,
@@ -282,6 +416,11 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     helixStepY: number;
     helixHalfHeight: number;
     isSoftwareGl: boolean;
+    shellParticles: THREE.Points;
+    trailGold: EnergyTrail;
+    trailCyan: EnergyTrail;
+    trailGold2: EnergyTrail;
+    trailGroup: THREE.Group;
   } | null>(null);
 
   // Initialize Three.js WebGLRenderer, Composer, Atmosphere, and Loop
@@ -304,7 +443,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.94;
+    renderer.toneMappingExposure = mode === 'hero' ? 1.0 : 0.92;
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 2));
 
     const width = Math.max(container.clientWidth, 320);
@@ -323,8 +462,8 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     renderer.domElement.addEventListener('webglcontextlost', handleContextLost);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050a14);
-    const sceneFog = new THREE.FogExp2(0x050a14, mode === 'hero' ? 0.015 : 0.013);
+    scene.background = new THREE.Color(0x04060d);
+    const sceneFog = new THREE.FogExp2(0x04060d, mode === 'hero' ? 0.019 : 0.014);
     scene.fog = simStateRef.current.fogEnabled ? sceneFog : null;
 
     // Procedural Studio Environment Reflection
@@ -334,7 +473,12 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     pmremGenerator.dispose();
 
     const camera = new THREE.PerspectiveCamera(44, width / height, 0.1, 240);
-    camera.position.set(mode === 'hero' ? 14 : 16, 3.5, mode === 'hero' ? 19 : 21);
+    if (mode === 'hero') {
+      // Start dolly further out; eases in over the first ~2.5s for a cinematic reveal
+      camera.position.set(20, 6.5, 28);
+    } else {
+      camera.position.set(16, 3.5, 21);
+    }
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = !isSoftwareGl;
@@ -357,42 +501,56 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     if (!isSoftwareGl) {
       composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, camera));
-      bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.18, 0.36, 0.88);
+      bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(width, height),
+        mode === 'hero' ? 0.28 : 0.18,
+        0.5,
+        0.82
+      );
       composer.addPass(bloomPass);
       composer.addPass(new OutputPass());
     }
 
-    // Balanced 3-Point Holographic Studio Lighting
-    const hemiLight = new THREE.HemisphereLight(0x22d3ee, 0x070d1a, 0.46);
+    // Cinematic Dual-Tone Studio Lighting: warm golden key + electric cyan rim
+    const hemiLight = new THREE.HemisphereLight(0x2a3a5a, 0x04060d, 0.40);
     scene.add(hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(0xeef8ff, 1.15);
+    const keyLight = new THREE.DirectionalLight(0xffd98a, 0.85);
     keyLight.position.set(16, 22, 18);
     scene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x22d3ee, 0.72);
+    const rimLight = new THREE.DirectionalLight(0x22d3ee, 1.0);
     rimLight.position.set(-18, -6, -16);
     scene.add(rimLight);
 
-    const violetAccent = new THREE.PointLight(0x7c5cff, 0.78, 52, 1.4);
-    violetAccent.position.set(0, 0, 14);
+    const goldAccent = new THREE.PointLight(0xffb347, 0.55, 60, 1.4);
+    goldAccent.position.set(0, 6, 16);
+    scene.add(goldAccent);
+
+    const violetAccent = new THREE.PointLight(0x7c5cff, 0.55, 48, 1.4);
+    violetAccent.position.set(0, -8, 12);
     scene.add(violetAccent);
 
-    // 1. Atmosphere: 560 Drifting Holographic Particles (adaptive count)
+    // 1. Atmosphere: dense drifting golden/cyan volumetric dust (adaptive count)
     const particleTex = createProceduralGlowTexture();
-    const particleCount = isSoftwareGl ? 400 : 620;
+    const particleCount = isSoftwareGl ? 700 : 1400;
     const pPositions = new Float32Array(particleCount * 3);
     const pColors = new Float32Array(particleCount * 3);
+    const cGold = new THREE.Color(0xffb347);
+    const cWarmWhite = new THREE.Color(0xffe6a8);
     const cCyan = new THREE.Color(0x22d3ee);
     const cViolet = new THREE.Color(0x7c5cff);
-    const cMagenta = new THREE.Color(0xff4fa3);
-    const palette = [cCyan, cViolet, cMagenta];
+    const dustPalette = [cGold, cGold, cWarmWhite, cCyan, cCyan, cViolet];
 
     for (let i = 0; i < particleCount; i++) {
-      pPositions[i * 3] = (Math.random() - 0.5) * 62;
-      pPositions[i * 3 + 1] = (Math.random() - 0.5) * 44;
-      pPositions[i * 3 + 2] = (Math.random() - 0.5) * 48 - 6;
-      const col = palette[i % palette.length];
+      // Distribute in a wide slab with a soft central density bias for depth
+      const rx = (Math.random() - 0.5) * 66;
+      const ry = (Math.random() - 0.5) * 48;
+      const rz = (Math.random() - 0.5) * 52 - 6;
+      pPositions[i * 3] = rx;
+      pPositions[i * 3 + 1] = ry;
+      pPositions[i * 3 + 2] = rz;
+      const col = dustPalette[i % dustPalette.length];
       pColors[i * 3] = col.r;
       pColors[i * 3 + 1] = col.g;
       pColors[i * 3 + 2] = col.b;
@@ -403,16 +561,48 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     particleGeo.setAttribute('color', new THREE.BufferAttribute(pColors, 3));
 
     const particleMat = new THREE.PointsMaterial({
-      size: 0.34,
+      size: 0.42,
       map: particleTex,
       vertexColors: true,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.7,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const dustPoints = new THREE.Points(particleGeo, particleMat);
     scene.add(dustPoints);
+
+    // 1b. Organic helical particle shell hugging the DNA strands (golden energy corona)
+    const shellCount = isSoftwareGl ? 1600 : 3600;
+    const shellPos = new Float32Array(shellCount * 3);
+    const shellColor = new Float32Array(shellCount * 3);
+    for (let i = 0; i < shellCount; i++) {
+      const t = i / shellCount;
+      const strand = i % 2 === 0 ? 1 : -1;
+      const angle = t * Math.PI * 2 * 8 + (strand > 0 ? 0 : Math.PI);
+      const shellR = 2.35 + Math.random() * 1.5;
+      shellPos[i * 3] = Math.cos(angle) * shellR;
+      shellPos[i * 3 + 1] = (t - 0.5) * 22 + (Math.random() - 0.5) * 0.6;
+      shellPos[i * 3 + 2] = Math.sin(angle) * shellR;
+      const col = i % 3 === 0 ? cCyan : i % 3 === 1 ? cGold : cWarmWhite;
+      shellColor[i * 3] = col.r;
+      shellColor[i * 3 + 1] = col.g;
+      shellColor[i * 3 + 2] = col.b;
+    }
+    const shellGeo = new THREE.BufferGeometry();
+    shellGeo.setAttribute('position', new THREE.BufferAttribute(shellPos, 3));
+    shellGeo.setAttribute('color', new THREE.BufferAttribute(shellColor, 3));
+    const shellMat = new THREE.PointsMaterial({
+      size: 0.16,
+      map: particleTex,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const shellParticles = new THREE.Points(shellGeo, shellMat);
+    scene.add(shellParticles);
 
     // 2. Atmosphere: Floating Procedural Ball-and-Stick Molecules in Background
     const floatingMolecules = new THREE.Group();
@@ -476,12 +666,50 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     rnaCompareGroup.visible = false;
     scene.add(rnaCompareGroup);
 
+    // 5. Dynamic golden + cyan energy-trail ribbons flowing along the double helix
+    const trailGroup = new THREE.Group();
+    const TRAIL_RADIUS = 2.02;
+    const TRAIL_TURNS = 10.5;
+    const trailHalfH = 11;
+    const trailGold = new EnergyTrail({
+      color: 0xffc247,
+      phase: 0,
+      radius: TRAIL_RADIUS,
+      turns: TRAIL_TURNS,
+      halfHeight: trailHalfH,
+      headLength: 0.14,
+      tailLength: 0.5,
+      segments: 140,
+    });
+    const trailCyan = new EnergyTrail({
+      color: 0x34e0ff,
+      phase: Math.PI,
+      radius: TRAIL_RADIUS,
+      turns: TRAIL_TURNS,
+      halfHeight: trailHalfH,
+      headLength: 0.12,
+      tailLength: 0.46,
+      segments: 140,
+    });
+    const trailGold2 = new EnergyTrail({
+      color: 0xfff0c0,
+      phase: Math.PI * 0.5,
+      radius: TRAIL_RADIUS * 1.14,
+      turns: TRAIL_TURNS,
+      halfHeight: trailHalfH,
+      headLength: 0.08,
+      tailLength: 0.32,
+      segments: 120,
+    });
+    trailGroup.add(trailGold.mesh, trailCyan.mesh, trailGold2.mesh);
+    helixRoot.add(trailGroup);
+
     // 4. Glassy Translucent Cas9 + Guide RNA Complex + Holographic HUD Rings + Cut Sparks
     const cas9Group = new THREE.Group();
     const cas9BubbleMat = new THREE.MeshPhysicalMaterial({
       color: 0x22d3ee,
       emissive: 0x0b3b4e,
-      emissiveIntensity: 0.22,
+      emissiveIntensity: 0.12,
       roughness: 0.22,
       metalness: 0.05,
       transparent: true,
@@ -496,7 +724,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     const cas9NucMat = new THREE.MeshPhysicalMaterial({
       color: 0x4cc9ff,
       emissive: 0x0b253a,
-      emissiveIntensity: 0.18,
+      emissiveIntensity: 0.10,
       roughness: 0.28,
       transparent: true,
       opacity: 0.22,
@@ -507,7 +735,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     const cas9PamMat = new THREE.MeshPhysicalMaterial({
       color: 0x7c5cff,
       emissive: 0x4b24cc,
-      emissiveIntensity: 0.30,
+      emissiveIntensity: 0.14,
       roughness: 0.24,
       transparent: true,
       opacity: 0.38,
@@ -543,7 +771,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
       new THREE.MeshStandardMaterial({
         color: 0xc084fc,
         emissive: 0xc084fc,
-        emissiveIntensity: 0.38,
+        emissiveIntensity: 0.16,
         roughness: 0.28,
       })
     );
@@ -623,6 +851,11 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
       helixStepY: 0.56,
       helixHalfHeight: 10,
       isSoftwareGl,
+      shellParticles,
+      trailGold,
+      trailCyan,
+      trailGold2,
+      trailGroup,
     };
 
     if (!isSoftwareGl) {
@@ -733,7 +966,9 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
       scene.fog = st.fogEnabled ? sceneFog : null;
       hemiLight.intensity = st.ambientIntensity;
       dustPoints.visible = st.particlesEnabled;
+      shellParticles.visible = st.particlesEnabled;
       floatingMolecules.visible = st.particlesEnabled;
+      trailGroup.visible = st.particlesEnabled;
 
       const objs = sceneObjectsRef.current;
       if (objs && objs.bpNodes.length > 0) {
@@ -747,6 +982,18 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
           camera.position.copy(_targetCamPos);
           controls.target.set(0, 0, 0);
           controls.update();
+        }
+
+        // Cinematic hero camera dolly intro (eases from wide to framing position)
+        if (st.mode === 'hero' && st.introCamProgress < 1 && !st.userInteracting) {
+          st.introCamProgress = Math.min(1, st.introCamProgress + dt * 0.4);
+          const e = 1 - Math.pow(1 - st.introCamProgress, 3);
+          _targetCamPos.set(
+            THREE.MathUtils.lerp(20, 14, e),
+            THREE.MathUtils.lerp(6.5, 3.5, e),
+            THREE.MathUtils.lerp(28, 19, e)
+          );
+          camera.position.lerp(_targetCamPos, 0.08 + e * 0.12);
         }
 
         // Toggle Compare Layout (DNA left, RNA right)
@@ -928,7 +1175,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
 
           if (node.isMismatchNode && !st.reducedMotion) {
             const mat = node.fwdBaseMesh.material as THREE.MeshPhysicalMaterial;
-            mat.emissiveIntensity = 0.32 + pulse * 0.38;
+            mat.emissiveIntensity = 0.12 + pulse * 0.16;
           }
         }
 
@@ -942,6 +1189,12 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
             objs.helixRoot.rotation.z = -Math.PI / 3.4 + st.mouseX * 0.08;
           }
           dustPoints.rotation.y += dt * 0.02;
+          shellParticles.rotation.y += dt * (st.mode === 'hero' ? 0.22 : 0.12);
+          // Dynamic golden + cyan energy ribbons flowing along both backbones
+          const t = now * 0.001;
+          objs.trailGold.update((t * 0.11) % 1, 0.42);
+          objs.trailCyan.update((t * 0.09 + 0.5) % 1, 0.38);
+          objs.trailGold2.update((t * 0.14 + 0.25) % 1, 0.3);
           floatingMolecules.children.forEach((child, idx) => {
             child.rotation.x += dt * (0.18 + idx * 0.05);
             child.rotation.y += dt * (0.24 + idx * 0.04);
@@ -1043,37 +1296,35 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
     ringGeo.rotateX(Math.PI / 2);
 
     const backboneHoloMat = new THREE.MeshPhysicalMaterial({
-      color: 0x22d3ee,
-      emissive: 0x0c4a5e,
-      emissiveIntensity: 0.22,
-      roughness: 0.22,
-      metalness: 0.16,
-      clearcoat: 0.75,
-      transparent: true,
-      opacity: objs.isSoftwareGl ? 0.8 : 0.88,
-      transmission: objs.isSoftwareGl ? 0 : 0.28,
+      color: 0xffc247,
+      emissive: 0xff9a1f,
+      emissiveIntensity: 0.12,
+      metalness: 0.92,
+      roughness: 0.18,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.15,
     });
 
     const sugarHoloMat = new THREE.MeshPhysicalMaterial({
-      color: 0x7dd3fc,
+      color: 0x34e0ff,
       emissive: 0x0e7490,
-      emissiveIntensity: 0.18,
-      roughness: 0.24,
-      metalness: 0.12,
-      clearcoat: 0.75,
+      emissiveIntensity: 0.16,
+      metalness: 0.55,
+      roughness: 0.16,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.12,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.96,
     });
 
     const rnaBackboneMat = new THREE.MeshPhysicalMaterial({
-      color: 0xc084fc,
-      emissive: 0x4c1d95,
-      emissiveIntensity: 0.24,
-      roughness: 0.22,
-      metalness: 0.14,
-      clearcoat: 0.75,
-      transparent: true,
-      opacity: 0.88,
+      color: 0xffd98a,
+      emissive: 0xff9a1f,
+      emissiveIntensity: 0.12,
+      metalness: 0.85,
+      roughness: 0.18,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.15,
     });
 
     // Site annotations
@@ -1139,7 +1390,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
       const fwdBaseMat = new THREE.MeshPhysicalMaterial({
         color: fwdColor,
         emissive: ann?.isMismatch ? 0xff1e4d : ann?.isPam ? 0x5b35ff : fwdColor,
-        emissiveIntensity: ann?.isMismatch ? 0.48 : ann?.isPam ? 0.30 : 0.14,
+        emissiveIntensity: ann?.isMismatch ? 0.24 : ann?.isPam ? 0.14 : 0.06,
         roughness: 0.20,
         metalness: 0.08,
         clearcoat: 0.75,
@@ -1148,7 +1399,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
       const revBaseMat = new THREE.MeshPhysicalMaterial({
         color: revColor,
         emissive: ann?.isPam ? 0x5b35ff : revColor,
-        emissiveIntensity: ann?.isPam ? 0.26 : 0.12,
+        emissiveIntensity: ann?.isPam ? 0.12 : 0.05,
         roughness: 0.20,
         metalness: 0.08,
         clearcoat: 0.75,
@@ -1158,7 +1409,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
       const rungMat = new THREE.MeshStandardMaterial({
         color: rungColor,
         emissive: rungColor,
-        emissiveIntensity: ann?.siteCategory ? 0.26 : 0.08,
+        emissiveIntensity: ann?.siteCategory ? 0.12 : 0.04,
         roughness: 0.30,
         metalness: 0.22,
       });
@@ -1273,7 +1524,7 @@ export const DnaHelixViewport: React.FC<DnaHelixViewportProps> = ({
           new THREE.MeshPhysicalMaterial({
             color: BASE_COLORS[rnaBase] ?? 0xc084fc,
             emissive: BASE_COLORS[rnaBase] ?? 0xc084fc,
-            emissiveIntensity: 0.4,
+            emissiveIntensity: 0.16,
             roughness: 0.15,
             clearcoat: 1.0,
           })
